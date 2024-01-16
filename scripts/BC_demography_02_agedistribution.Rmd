@@ -1,0 +1,724 @@
+---
+title: "BC_demography_02_agedistribution"
+author: "Martin Monkman"
+date: "January 08, 2020"
+output: html_document
+---
+<!--
+Copyright 2020 Province of British Columbia
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and limitations under the License.
+-->
+
+
+```{r setup, echo=FALSE, message_group=FALSE}
+
+# tidyverse
+library(tidyverse)
+
+# utilities
+library(glue)
+library(here)
+library(janitor)
+#
+# tables
+library(xtable)
+#
+# plotting
+library(gganimate)
+library(zoo)
+library(scales)
+#
+
+# PLOTTING ESSENTIALS
+
+# create a chart theme & colour palette for use in ggplot2
+# this theme is the basic background for a BC Stats chart
+#
+theme_BCStats <- 
+  theme_bw() +
+  theme(
+    panel.border = element_rect(colour="white"),
+    axis.line = element_line(colour="black"),
+#    legend.position=c(1,0), 
+#    legend.justification=c(1,0),
+    legend.title = element_text(size=12),
+    legend.text = element_text(size=11),
+    axis.title = element_text(size=16),
+    axis.text = element_text(size=16),
+    plot.title = element_text(size=18)
+  )
+#
+
+# colour palette for BC Stats charts (use with scale_colour_manual)
+palette_BCStats <- c("#234275", "#E3A82B", "#26BDEF", "#11CC33", "#D3E2ED", "8A8A8A")
+
+# grayscale for fill (use with scale_fill_manual)
+palette_BCStats_fill <- c("#3F3F3F", "#ABABAB", "#DFDFDF", "#969696", "#838383", "8A8A8A")
+
+
+#
+txt_caption <- "Source: Statistics Canada, CANSIM Table 17-10-0005-01"
+txt_caption2 <- "Source: Statistics Canada, CANSIM Tables 17-10-0005-01 & 17-10-0057-01"
+
+
+```
+
+## Plot the age distribution of British Columbia & Canada, 1971–present
+
+### data
+
+
+Source:
+Statistics Canada, CANSIM 
+[Population estimates on July 1st, by age and sex](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000501)
+
+Table: 17-10-0005-01 (formerly CANSIM 051-0001)
+
+The source file contains population for Canada, the provinces and territories, by age (and age group), and by sex, for the years 1976-2020 (as of this writing).
+
+Source file:  (https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000501)
+
+
+The CANSIM extract requires some carpentry to be useful for the purposes of this plotting. The tidied version becomes a data frame `data_age_groupdistrib_BC_2019`.
+
+**Notes:** 
+
+1. The table originally tabulated the last category as "90 years and over"; starting with 2001 this category was expanded to single years 90 through 99, and a "100 years and over" category was added. Depending on the year(s) of interest, the treatment of the extreme category will vary. 
+
+2. The extreme age_group categories appear for all years, but are empty values. These lead to "parsing failures" when reading the source .csv file.
+
+
+Read and clean data
+
+```{r read_data, echo=FALSE, message_group=FALSE}
+
+# read the data
+df_1710000501 <- read_rds("../data_source/df_1710000501.rds")
+
+
+```
+
+
+
+
+
+Filter so that only single year categories remain (i.e. age 0, 1, 2, etc)
+
+**Note:** the years up to and including 2000 include "90 years and over" as the oldest category; in 2001 the years 90-99 were included as single years, and the oldest category became "100 years and over". To make a data frame with single categories
+
+* for those years, the 90+ category needs to be reframed as the single year "90"
+
+* for the other years, the 90+ category needs to be dropped entirely
+
+```{r}
+
+# # getting the lay of the data
+# ls.str(df_1710000501)
+# 
+# unique(df_1710000501$age_group)
+# unique(df_1710000501$geo)
+# unique(df_1710000501$ref_date)
+# unique(df_1710000501$sex)
+# 
+# df_1710000501 %>% 
+#   filter(sex == "Both sexes",
+# #         age_group == "100 years and over", 
+#          age_group == "99 years", 
+#          geo == "Canada")
+
+
+
+# age category values to drop
+drop.age_group.vals_1 <- c("All ages", "0 to 4 years", "5 to 9 years",
+                   "10 to 14 years", "15 to 19 years", 
+                   "20 to 24 years", "25 to 29 years", 
+                   "30 to 34 years", "35 to 39 years", 
+                   "40 to 44 years", "45 to 49 years", 
+                   "50 to 54 years", "55 to 59 years", 
+                   "60 to 64 years", "65 to 69 years", 
+                   "70 to 74 years", "75 to 79 years", 
+                   "80 to 84 years", "85 to 89 years", 
+                   "90 to 94 years", "95 to 99 years",
+                   "0 to 14 years", "0 to 15 years", "0 to 16 years", "0 to 17 years",
+                   "15 to 49 years", "15 to 64 years", "16 to 64 years", "17 to 64 years",
+                   "18 years and over", "18 to 64 years", "18 to 24 years", "25 to 44 years",
+                   "45 to 64 years", "65 years and over", 
+                   "Median age", "Average age")
+
+df_single <- df_1710000501 %>% 
+  filter(!age_group %in% drop.age_group.vals_1)
+
+df_single_1971 <- df_single %>% 
+  filter(ref_date < 2001) %>% 
+  mutate(age_group.num = gsub(" years", "", age_group)) %>% 
+  mutate(age_group.num = gsub(" year", "", age_group.num)) %>% 
+  mutate(age_group.num = gsub(" and over",  "", age_group.num)) %>% 
+  mutate(age_group.num = as.integer(age_group.num))
+
+df_single_2001 <- df_single %>% 
+  filter(ref_date > 2000) %>% 
+  filter(age_group != "90 years and over") %>% 
+  mutate(age_group.num = gsub(" years", "", age_group)) %>% 
+  mutate(age_group.num = gsub(" year", "", age_group.num)) %>% 
+  mutate(age_group.num = gsub(" and over",  "", age_group.num)) %>% 
+  mutate(age_group.num = as.integer(age_group.num))
+  
+data_age_groupdistrib_single <- rbind(df_single_1971, df_single_2001)  
+
+#write_rds(data_age_groupdistrib_single, "../data_output/data_age_groupdistrib_single.rds")
+#data_age_groupdistrib_single <- read_rds("../data_output/data_age_groupdistrib_single.rds")
+```
+
+
+
+```{r}
+
+data_age_groupdistrib_single <- data_age_groupdistrib_single %>% 
+  mutate(ref_date_year = as.integer(ref_date)) %>% 
+  # add pct of year (by geo and sex)
+  group_by(geo, ref_date, sex) %>% 
+  mutate(year_pct = (value / sum(value) * 100)) %>% 
+  ungroup()
+
+# quick test
+data_age_groupdistrib_single %>% 
+  filter(geo == "British Columbia",
+         ref_date == "2019",
+         sex == "Both sexes") %>% 
+  summarise(total_pop = sum(value),
+            total_pct = sum(year_pct))
+
+#write_rds(data_age_groupdistrib_single, "../data_output/data_age_groupdistrib_single.rds")
+#data_age_groupdistrib_single <- read_rds("../data_output/data_age_groupdistrib_single.rds")
+
+
+```
+
+
+
+
+```{r}
+
+# filter for British Columbia, both sexes, most recent year distribution
+
+year_min <- min(data_age_groupdistrib_single$ref_date)
+year_max <- max(data_age_groupdistrib_single$ref_date)
+
+data_age_groupdistrib_BC_max <- data_age_groupdistrib_single %>%
+  select(geo, ref_date, sex, age_group,  age_group.num, value, year_pct) %>%
+  filter(geo == "British Columbia") %>%
+  filter(ref_date == year_max) %>%
+  filter(sex == "Both sexes")
+
+#write_rds(data_age_groupdistrib_BC_max, "../data_source/data_age_groupdistrib_BC_max.rds")
+#data_age_groupdistrib_BC_max <- read_rds("../data_source/data_age_groupdistrib_BC_max.rds")
+
+
+```
+
+### Plot: age_group distribution, British Columbia `r year_max`
+
+This set of charts shows the distribution of the B.C. population, by one year age_group groups.
+
+The first group shows the absolute number of people, and the second shows the percentage_group of the population in each group (useful for comparisons across time).
+
+
+The first version of the plot is a basic version. The second version adds an assortment of formatting:
+
+* axis length and grid specifications
+* axis titles
+* chart title, subtitle, and source
+
+Note that the X axis scale is such that it follows the five year increments of the Census of Canada.
+
+
+
+```{r}
+
+# basic
+plot_age_groupdist_BC_max <- ggplot(data_age_groupdistrib_BC_max, aes(x=age_group.num, y=value)) +
+  geom_bar(stat="identity", fill="#234275")
+
+plot_age_groupdist_BC_max
+
+
+# Add formatting
+
+plot_age_groupdist_BC_max <- plot_age_groupdist_BC_max +
+  theme_BCStats +
+  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: age distribution (total)",
+       subtitle = year_max,
+       y = "population", x = "age",
+       caption = txt_caption) +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+#  scale_x_discrete(breaks = c("10", "20", "30", "40", "50", 
+#                              "60", "70", "80", "90", "100+")) +
+  scale_y_continuous(limits = c(0, 90000), breaks = seq(0, 90000, by = 10000),
+                     labels = comma)
+
+plot_age_groupdist_BC_max
+
+## save the plot as a png file
+plot_file_name <- glue('../plot_images/plot_age_groupdist_BC_{year_max}.png')
+ggsave(plot_file_name, width=9, height=6)
+#
+
+```
+
+
+Repeat, but with percentage_group
+
+```{r}
+
+# basic
+plot_age_groupdist_BC_max_pct <- ggplot(data_age_groupdistrib_BC_max, aes(x=age_group.num, y=year_pct)) +
+  geom_bar(stat="identity", fill="#234275")
+
+plot_age_groupdist_BC_max_pct
+
+
+# Add formatting
+
+plot_age_groupdist_BC_max_pct <- plot_age_groupdist_BC_max_pct +
+  theme_BCStats +
+  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: age distribution (percentage)",
+       subtitle = year_max,
+       y = "population", x = "age",
+       caption = txt_caption) +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+  scale_y_continuous(limits = c(0, 2.25), breaks = seq(0, 2.0, by = 0.5)) 
+
+plot_age_groupdist_BC_max_pct
+
+
+## save the plot as a png file
+plot_file_name <- glue('../plot_images/plot_age_groupdist_BC_{year_max}_pct.png')
+ggsave(plot_file_name, width=9, height=6)
+
+```
+
+
+```{r}
+
+# highlight the generations
+
+# baby boom (in Canada): 1946 - 1965
+# gen X: 1966 - 1980
+# millennials: 1981 - 1995
+# gen X: 1996 - 2001
+
+# https://www.pewresearch.org/fact-tank/2019/01/17/where-millennials-end-and-generation-z-begins/
+
+boomer_max <- as.integer(year_max) - 1946
+boomer_min <- as.integer(year_max) - 1965
+genx_max <- as.integer(year_max) - 1965
+genx_min <- as.integer(year_max) - 1980
+millen_max <- as.integer(year_max) - 1980
+millen_min <- as.integer(year_max) - 1995
+genz_max <- as.integer(year_max) - 1995
+genz_min <- as.integer(year_max) - 2010
+
+
+plot_age_groupdist_BC_max_shade <- plot_age_groupdist_BC_max +
+  # add shaded rectangle for the projection range
+  # boomer
+  annotate("rect", xmin=boomer_min, xmax=boomer_max, ymin=0, ymax=89750, alpha=0.1, fill="green") +
+  annotate("text", x=(boomer_min + 7), y=85000,  label="Boomers") +
+  # gen X
+  annotate("rect", xmin=genx_min, xmax=genx_max, ymin=0, ymax=89750, alpha=0.1, fill="blue") +
+  annotate("text", x=(genx_min + 5), y=85000,  label="GenX") +
+  # avocado toast
+  annotate("rect", xmin=millen_min, xmax=millen_max, ymin=0, ymax=89750, alpha=0.1, fill="red") +
+  annotate("text", x=(millen_min + 7), y=85000,  label="Millennials") +
+  # post-avocado toast
+  annotate("rect", xmin=genz_min, xmax=genz_max, ymin=0, ymax=89750, alpha=0.1, fill="orange") +
+  annotate("text", x=(genz_min + 5), y=85000,  label="GenZ") 
+  
+
+plot_age_groupdist_BC_max_shade
+
+# save the plot as a png file
+# save the plot as a png file
+plot_file_name <- glue('../plot_images/plot_age_groupdist_BC_{year_max}_shade.png')
+ggsave(plot_file_name, width=9, height=6)
+
+
+
+```
+
+
+The total population of British Columbia has increased from 2.2 million in 1971 to 5.1 million in 2019. The population surpassed 3 million in 1986, and 4 million in 1999.
+
+
+#### Density Plot
+
+**NOTE**
+
+Not really a density plot at all! A density plot is essentially an extension of a histogram calculation; here the histogram is pre-calculated, so that the solution is a loess smoothing line.  Some eye-balling suggests that a span = 0.3 is a pretty good approximation (see below).
+
+
+Having two smoothed lines representing the top of the bars is an effective way to compare the distribution of the population at two or three points in time.
+
+
+
+Plot with curves
+
+```{r}
+
+plot_age_groupdist_BC_max +
+ geom_smooth(span = 0.3, se = FALSE, colour = "#E3A82B", size = 1.5)  
+
+# save the plot as a png file
+ggsave("../plot_images/plot_age_groupdist_BC_max_smooth.png", width=9, height=6)
+  
+
+```
+
+
+```{r}
+# regular plot -- most recent year
+
+plot_smooth_years <- data_age_groupdistrib_single %>% 
+  filter(geo == "British Columbia" & sex == "Both sexes") %>% 
+  filter(ref_date_year == year_min | ref_date_year == year_max) %>% 
+  ggplot(aes(x=age_group.num, y=value, colour = ref_date)) +
+  geom_smooth(span = 0.3, se = FALSE)
+
+plot_smooth_years
+
+plot_smooth_years <- plot_smooth_years +
+  theme_BCStats +
+  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: age distribution (total)",
+       subtitle = glue('{year_min} & {year_max}'),
+       y = "population", x = "age",
+       caption = txt_caption) +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+  scale_y_continuous(limits = c(0, 90000), breaks = seq(0, 90000, by = 10000),
+                     labels = comma) +
+#  theme(
+#    legend.position = c(1, 1),
+#    legend.justification = c("right", "top"),
+#    legend.title = element_blank()
+#  ) +
+  theme(legend.position = "none") +
+  annotate("text", x=25, y=30000, label = year_min, colour =  "#234275", fontface = 2) +
+  annotate("text", x=64, y=60000, label = year_max, colour =  "#234275", fontface = 2)
+  
+  
+
+plot_smooth_years
+
+# save the plot as a png file
+ggsave("../plot_images/plot_smooth_years.png", width=9, height=6)
+  
+  
+
+
+```
+
+
+## animate
+
+
+```{r eval=FALSE}
+
+p <- data_age_groupdistrib_single %>% 
+  filter(geo == "British Columbia" & sex == "Both sexes") %>% 
+  #
+  ggplot(aes(x=age_group.num, y=value)) +
+  geom_bar(stat="identity", fill="#234275") +
+  theme_BCStats +
+  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: age distribution (total)",
+#       subtitle = "2019",
+       y = "population", x = "age",
+       caption = txt_caption) +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+#  scale_x_discrete(breaks = c("10", "20", "30", "40", "50", 
+#                              "60", "70", "80", "90", "100+")) +
+  scale_y_continuous(limits = c(0, 90000), breaks = seq(0, 90000, by = 10000),
+                     labels = comma) +
+  # gganimate
+#  transition_time(ref_date_year) +
+  transition_time(ref_date_year) +
+  labs(subtitle = "Year: {frame_time}")
+
+
+#p
+#
+#animate(p, duration = 30)
+#
+#anim_save("BC_pop_dist_anim.gif")
+
+```
+
+
+```{r}
+# combined plot: percentage_group
+
+plot_smooth_pct <- 
+  data_age_groupdistrib_single %>% 
+  filter(geo == "British Columbia" & sex == "Both sexes") %>% 
+  filter(ref_date_year == year_min | ref_date_year == year_max) %>% 
+  ggplot(aes(x=age_group.num, y=year_pct, colour = ref_date)) +
+  geom_smooth(span = 0.3, se = FALSE) + 
+  annotate("text", x=20, y=2.0, label = year_min, colour =  "#234275", fontface = 2) +
+  annotate("text", x=66, y=1.5, label = year_max, colour =  "#234275", fontface = 2)
+  
+
+plot_smooth_pct <- plot_smooth_pct +
+  theme_BCStats +
+  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: age distribution (percent)",
+       subtitle = glue('{year_min} & {year_max}'),
+       y = "percent of population", x = "age",
+       caption ="Source: Statistics Canada, CANSIM Table 051-0001") +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+  scale_y_continuous(limits = c(0, 2.25), breaks = seq(0, 2.0, by = 0.5)) +
+#  theme(
+#    legend.position = c(1, 1),
+#    legend.justification = c("right", "top"),
+#    legend.title = element_blank()
+#  ) +
+  theme(legend.position = "none")
+  
+  
+  
+plot_smooth_pct
+
+## save the plot as a png file
+#png("plot_smooth_pct.png", width=1024, height=768, res=120)
+#plot(plot_smooth_pct)
+#dev.off()
+  
+
+```
+
+## Projections
+
+
+Population Projections for Canada (2018 to 2068), Provinces and Territories (2018 to 2043)
+
+https://www150.statcan.gc.ca/n1/pub/91-520-x/91-520-x2019001-eng.htm
+
+Data: 
+
+Projected population, by projection scenario, age and sex, as of July 1 (x 1,000)1
+Frequency: Annual
+
+Table: 17-10-0057-01 (formerly CANSIM 052-0005)
+
+Geography: Canada, Province or territory
+
+https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710005701
+
+
+
+**NOTE**
+
+This plot uses the "M3" projection:
+
+> The medium-growth (M3) scenario contains the following assumptions at the Canada level: the total fertility rate reaches 1.59 children per woman in 2042/2043 and remains constant thereafter; life expectancy at birth reaches 87.0 years for males and 89.0 years for females in 2067/2068; interprovincial migration is based on the trends observed between 2003/2004 and 2008/2009; the immigration rate reaches 0.83% in 2042/2043 and remains constant thereafter; the annual number of non-permanent residents reaches 1,397,060 in 2043 and remains constant thereafter; the net emigration rate reaches 0.15% in 2042/2043 and remains constant thereafter.
+
+
+
+
+```{r read_data_projection, echo=FALSE, message_group=FALSE}
+
+# read the data
+data_BC_projection <- read_rds("../data_output/data_BC_projection.rds")
+
+
+```
+
+
+```{r}
+df_single_proj <- data_BC_projection %>% 
+  filter(!age_group %in% drop.age_group.vals_1 &
+           sex == "Both sexes" &
+           ref_date > year_max) %>% 
+  # drop rows for the years that StatCan only projects Canadian population
+  drop_na(value) %>% 
+  mutate(value_th = value * 1000)
+  
+
+# create new variable with just the number component of the age group string
+df_single_proj <- df_single_proj %>% 
+  mutate(age_group.num = 
+           case_when(
+             age_group == "Under 1 year" ~ 0,
+             TRUE ~ parse_number(age_group))
+  )
+
+```
+
+
+
+```{r}
+
+year_max_proj <- max(df_single_proj$ref_date)
+
+df_single_proj_max <- df_single_proj %>% 
+  group_by(ref_date) %>% 
+  mutate(age_grp_pct = value / sum(value) * 100) %>% 
+  filter(ref_date == year_max_proj)
+
+df_single_proj_max
+
+```
+
+
+```{r}
+
+plot_smooth_years_proj <-
+plot_smooth_years + 
+  geom_smooth(data = df_single_proj_max, 
+              aes(x = age_group.num, y = value_th),
+              span = 0.3, se = FALSE) +
+  annotate("text", x=90, y=50000, label = year_max_proj, colour =  "#234275", fontface = 2) +
+  labs(subtitle = glue('{year_min}, {year_max} & {year_max_proj} (M3 projection)'),
+       caption = txt_caption2)  +
+  theme(legend.position = "none")
+plot_smooth_years_proj
+
+# save the plot as a png file
+ggsave("../plot_images/plot_smooth_years_proj.png", width=9, height=6)
+  
+  
+plot_smooth_pct_proj <-
+plot_smooth_pct +
+  geom_smooth(data = df_single_proj_max, 
+              aes(x = age_group.num, y = age_grp_pct),
+              span = 0.3, se = FALSE) +
+  annotate("text", x=86, y=1.0, label = year_max_proj, colour =  "#234275", fontface = 2) +
+  labs(subtitle = glue('{year_min}, {year_max} & {year_max_proj} (M3 projection)'),
+       caption = txt_caption2) +
+  theme(legend.position = "none")
+
+plot_smooth_pct_proj
+
+# save the plot as a png file
+ggsave("../plot_images/plot_smooth_pct_proj.png", width=9, height=6)
+
+  
+
+```
+
+
+## 65+ and 85+
+
+```{r}
+
+#data_age_groupdistrib_single <- read_rds("../data_output/data_age_groupdistrib_single.rds")
+data_age_groupdistrib_single
+
+df_65plus_BC <- 
+data_age_groupdistrib_single %>% 
+  filter(geo == "British Columbia",
+         sex == "Both sexes",
+         age_group.num >= 65)
+
+df_65plus_BC <- df_65plus_BC %>% 
+  select(ref_date_year, geo, sex, age_group, age_group.num, value)
+
+df_65plus_BC
+
+```
+
+
+```{r}
+df_single_proj
+
+df_single_proj_65 <- df_single_proj %>% 
+  mutate(ref_date_year = as.integer(ref_date)) %>% 
+  filter(age_group.num >= 65) %>% 
+  select(ref_date_year, geo, sex, age_group, age_group.num, value = value_th) 
+
+df_single_proj_65
+
+df_65plus_BC_proj <- rbind(df_65plus_BC, df_single_proj_65)
+
+tail(df_65plus_BC_proj)
+```
+
+
+
+```{r}
+df_65plus_summary <-
+df_65plus_BC_proj %>% 
+  drop_na(value) %>% 
+  group_by(geo, ref_date_year, sex) %>% 
+  summarise(total_pop_65 = sum(value),
+            total_pop_80 = sum(value[age_group.num >= 80]))
+
+df_65plus_summary
+```
+
+#### chart
+
+```{r}
+
+ch_65plus <- 
+ggplot(df_65plus_summary) +
+  geom_line(aes(x = ref_date_year, y = total_pop_65), colour = "#234275", size = 1.5) +
+  geom_line(aes(x = ref_date_year, y = total_pop_80), colour = "#E3A82B", size = 1.5) 
+  
+ch_65plus
+
+```
+
+
+
+```{r}
+ch_65plus +
+  theme_BCStats +
+#  scale_colour_manual(values=palette_BCStats) +
+  labs(title = "British Columbia: population, ages 65+ & 80+",
+       subtitle = glue('{year_min}–{year_max_proj}'),
+       y = "population", x = "",
+       caption = txt_caption2) +
+#  scale_x_continuous(breaks = seq(0, 100, 10)) +
+  scale_y_continuous(limits = c(0, 1750000), breaks = seq(0, 1750000, by = 250000),
+                     labels = comma) +
+#  theme(
+#    legend.position = c(1, 1),
+#    legend.justification = c("right", "top"),
+#    legend.title = element_blank()
+#  ) +
+  theme(legend.position = "none") +
+  annotate("text", x=1990, y=500000, label = "65+", colour =  "#234275", fontface = 2) +
+  annotate("text", x=2015, y=300000, label = "80+", colour =  "#E3A82B", fontface = 2) +
+#  
+  # projection box
+  annotate("rect", xmin=as.numeric(year_max), xmax=as.numeric(year_max_proj), ymin=0, ymax=1750000, alpha=0.1, fill="blue") +
+  annotate("text", x=(as.numeric(year_max) + 5), y=1650000,  label="projection", colour = "blue") 
+  
+
+# save the plot as a png file
+ggsave("../plot_images/plot_65plus.png", width=9, height=6)
+
+
+```
+
+
+## Summary statistics
+
+Questions:
+
+- what percentage_group of British Columbians are 65 and older?
+- how many school-age_group children are there?
+- when was the peak in school age_group children?
+
+-30-
