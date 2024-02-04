@@ -1,0 +1,515 @@
+---
+title: "population map"
+author: "Martin Monkman"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# packages
+library(tidyverse)
+library(here)
+
+# create list of Northern BC Census Divisions (== Regional Districts) numbers
+
+# Cariboo [41], Fraser Fort George [53], 
+# Kitimat-Stikine [49], Skeena-Queen Charlotte [North Coast 47], 
+# Bulkley-Nechako [51], Stikine [57], 
+# Northern Rockies [59], Peace River [55]
+# and parts of Squamish-Lillooet and North Okanagan
+
+cd_list <- c("41", "53", "49", "47", "51", "57", "59", "55")
+cd_list <- as.numeric(cd_list) * 1000
+
+```
+
+## read data
+
+Source:
+
+-   https://www2.gov.bc.ca/gov/content/data/statistics/people-population-community/population/population-estimates
+
+-   https://www2.gov.bc.ca/assets/gov/data/statistics/people-population-community/population/pop_municipial_subprov_areas.xlsx
+
+Source: BC Stats, Population Estimates by Regional Districts and Development Regions
+
+Population Distribution Vancouver Island and Coast by Age Group\
+2011 2016 2021\
+Under 15 years old 14% 13% 13% Working Age Population (Aged 15 - 64) 67% 65% 62% Population 65+ 19% 22% 25%
+
+Source: BC Stats, Population by Age and Sex.
+
+#### download
+
+https://bcstats.shinyapps.io/popApp/
+
+Select:
+
+-   region type == "Regional District"
+
+-   region(s) == as above
+
+-   years == all
+
+-   genders == Totals
+
+-   age format == "5-year Age Groups"
+
+-   variables to display as columns = Age
+
+Rename file as "pop_regional district_est proj_5 yr.csv"
+
+
+NOTE: StatCan table with same data for Canada (but no projections) is 
+
+Census Division
+
+Population estimates, July 1, by census division, 2016 boundaries1, 2, 3, 4, 5, 6
+Frequency: Annual
+
+Table: 17-10-0139-01
+
+Release date: 2023-01-11
+
+Geography: Canada, Province or territory, Census division
+https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710013901
+
+Census Subdivision: https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710014201
+
+
+#### direct pull!
+
+Uses BC Data Catalogue
+
+
+```{r data_pull, eval=FALSE}
+
+resource_codes <-  bcdata::bcdc_tidy_resources("86839277-986a-4a29-9f70-fa9b1166f6cb") %>% pull(id)
+
+data1 <- map_dfr(
+resource_codes,
+bcdata::bcdc_get_data,
+record = "86839277-986a-4a29-9f70-fa9b1166f6cb",
+show_col_types = FALSE
+)
+
+file_name <- glue::glue("pop_bcdata_{today()}.rds")
+write_rds(data1, here::here("data_output", file_name))
+
+```
+
+```{r data_read}
+file_name <- glue::glue("pop_bcdata_{today()}.rds")
+
+data1 <- read_rds(here::here("data_output", file_name))
+
+```
+
+explore the data 
+
+```{r}
+
+df_rd_pop_total <- data1 |> 
+  filter(Region.Type == "Regional District") |> 
+  filter(Region %in% cd_list) |> 
+  filter(Gender == "T") |> 
+  select(Region:Total)
+
+# transform regional district number to conform to mapping data
+df_rd_pop_total <- df_rd_pop_total |> 
+  mutate(geo_uid = glue::glue("59{Region}")) |> 
+  mutate(geo_uid = str_sub(geo_uid, 1, 4)) |> 
+  relocate(geo_uid)
+
+df_rd_pop_total <- df_rd_pop_total |> 
+  group_by(Region) |> 
+  mutate(pop_change = Total - lag(Total)) |> 
+  mutate(pop_change_rate = pop_change / lag(Total) *100)
+
+df_rd_pop_total
+
+
+file_name <- glue::glue("pop_northbc_rd_{today()}.rds")
+write_rds(df_rd_pop_total, here::here("data_output", file_name))
+
+df_rd_pop_total <- read_rds(here::here("data_output", file_name))
+
+
+```
+
+How fast is the Cariboo RD growing?
+
+```{r}
+
+df_rd_pop_total |> 
+  filter(Region.Name == "Cariboo") |> 
+  ggplot(aes(x = Year, y = pop_change)) + 
+    geom_line()
+
+
+```
+
+
+## 2022 over 2021
+
+```{r}
+
+df_rd_pop_total_current <- df_rd_pop_total |> 
+  filter(Year == 2022)
+
+df_rd_pop_total_current
+
+```
+
+
+## link shapes
+
+
+This first section is plagiarized from another project--I wanted to make sure I had a working reference.
+
+```{r}
+# retrieve sf dataframe
+
+#cd_pop_shape <- get_census(dataset='CA21', regions=list(PR="59"),
+##                         vectors=c("median_at_cfc"="v_CA16_2456"), #omit
+#                         level='CD', quiet = TRUE, 
+#                         geo_format = 'sf', labels = 'short')
+#
+#cd_pop_shape <- cd_pop_shape %>% 
+#  janitor::clean_names() %>%
+#  # calculate household size
+#  mutate(household_size = population/households)
+
+#write_rds(cd_pop_shape, here("data_geography", "sf_2021_cd_bc_pop.rds"))
+
+
+# load dataframe created in the now-commented-out code above
+cd_pop_shape <- read_rds(here::here("data_geography", "sf_2021_cd_bc_pop.rds"))
+```
+
+basic map of household size
+
+```{r}
+
+ggplot(cd_pop_shape) + 
+  geom_sf(aes(fill = household_size))
+
+```
+
+
+```{r}
+# NOTE: starting with the dataframe that has the data but not the shape does not include the "geometry" variable we need for mapping! 
+
+
+df_pop_shape <- cd_pop_shape %>% 
+  left_join(df_rd_pop_total_current, by = "geo_uid") 
+
+# drop names of RDs that our out-of-scope
+df_pop_shape <- df_pop_shape |> 
+    filter() |> 
+
+  mutate(name_rd = case_when(
+    Region %in% cd_list ~ name,
+    TRUE ~ NA_character_
+  )) |> 
+  # clean up names
+  mutate(name_rd = str_remove(name_rd, " \\(RD\\)$")) |> 
+  mutate(name_rd = str_remove(name_rd, " \\(REG\\)$"))
+
+
+
+# create sf object with only in-scope RDs
+df_sf_rd_list <- df_pop_shape |> 
+    filter(!is.na(name_rd))
+
+df_sf_rd_list
+
+```
+
+## map growth rate
+
+
+
+
+```{r map_vet_orange}
+
+map_rd_pop_growth <- ggplot(df_pop_shape) +
+  geom_sf(aes(fill = pop_change_rate), colour = "grey90") +
+  scale_fill_gradient(
+    low = "#eef0f2",
+    high = "#0c3343",
+    na.value = "#ffffff",
+    name = "Percent change"
+    ) +
+  coord_sf(
+  # projection
+    datum = sf::st_crs(3153)
+  # crop
+  # longitude
+#    xlim = c(-123.4,-128.8),
+  # latitude
+#    ylim = c(48.4, 50.8)
+    ) +  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = c(0.1, 0.4)
+  ) +
+#  coord_sf(datum = sf::st_crs(3153))
+#  coord_sf(datum = NULL)
+  labs(title = "Population growth, 2021–2022", 
+       subtitle = "Northern BC Regional Districts",
+       caption = "Source: Statistics Canada & BC Stats",
+       x = NULL,
+       y = NULL)
+
+map_rd_pop_growth
+
+map_rd_pop_growth +
+  # add regional district name
+  geom_sf_label(
+    data = df_pop_shape,
+    aes(label = name), 
+    colour = "black", 
+    size = 1
+    )  
+
+map_rd_pop_growth +
+  # add regional district name
+  geom_sf_label(
+    data = df_sf_rd_list,
+    aes(label = name_rd ), 
+    colour = "black", 
+    size = 1,
+    show.legend = FALSE
+    )  
+
+
+
+#ggsave(here::here("plot_output", "vi_rd_pop_growth.jpg"))
+ggsave(here::here("plot_output", "rd_pop_growth_600dpi_test.jpg"), dpi = 600)
+
+```
+
+
+#### map with just the labels
+
+
+```{r}
+ggplot() +
+  geom_sf_text(
+    data = df_sf_rd_list, 
+    aes(label = name_rd ), 
+    colour = "#000000", 
+    size = 1.5,
+    show.legend = FALSE
+    )  
+
+```
+
+
+### generalized loop through a few years
+
+
+```{r}
+df_rd_pop_total |> 
+  filter(Year == 2014) |> 
+  summarise(min(pop_change_rate, na.rm = TRUE),
+            max(pop_change_rate, na.rm = TRUE))
+```
+
+
+#### loop
+
+```{r}
+
+year_range <- 2015:2022
+
+for (i in year_range) {
+
+print(i)
+getwd()
+  
+year_current <- i
+#year_current <- 2015
+
+year_before <- year_current - 1
+
+chart_title <- glue::glue("Population growth, {year_before}–{year_current}")
+
+df_rd_pop_total_current <- df_rd_pop_total |> 
+  filter(Year == year_current)
+
+#df_rd_pop_total_current
+
+
+# NOTE: starting with the dataframe that has the data but not the shape does not include the "geometry" variable we need for mapping! 
+
+df_pop_shape <- cd_pop_shape %>% 
+  left_join(df_rd_pop_total_current, by = "geo_uid") 
+
+ggplot(df_pop_shape) +
+  geom_sf(aes(fill = pop_change_rate), colour = "grey95") +
+
+
+# LABELS    
+#  geom_sf_text(
+  geom_sf_label(
+    data = df_sf_rd_list, 
+    aes(label = name_rd), 
+    colour = "#000000", 
+    size = 1.5,
+    show.legend = FALSE
+    )  +
+
+
+#  scale_fill_gradient(
+#      low = "#a6611a",
+#    high = "#018571",
+#    na.value = "#ffffff",
+#    limits = c(-2.0, 3.0),
+#    name = "Percent change"
+  scale_fill_distiller(
+    name = "Percent change\nfrom previous year",
+    palette = "BrBG", 
+    direction = 1,
+    na.value = "grey90",
+    limits = c(-2, 3)
+    ) +
+  coord_sf(
+  # crop
+  # longitude
+#    xlim = c(-123.4,-128.8),
+  # latitude
+#    ylim = c(48.4, 50.8),
+  # projection
+#    datum = sf::st_crs(3005)
+    datum = sf::st_crs(3153)
+    ) +  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = c(0.1, 0.4)
+  ) +
+#  coord_sf(datum = sf::st_crs(3153))
+#  coord_sf(datum = NULL)
+
+  labs(title = chart_title, 
+       subtitle = "Northern BC Regional Districts",
+       caption = "Source: Statistics Canada",
+       x = NULL,   # need to NULL so that there are no "X" and "Y" artifacts
+       y = NULL
+       )
+       
+
+#ggsave(here::here("plot_output", "vi_rd_pop_growth.jpg"))
+file_name <- glue::glue("rd_pop_growth_{year_current}.jpg")
+ggsave(here::here("plot_output", file_name), 
+       dpi = 600,
+       width = 9,
+       height = 6,
+       units = "in"
+       )
+
+}
+
+```
+
+
+```{r}
+
+year_range <- 2015:2022
+
+for (i in year_range) {
+  print(i)
+}
+
+```
+
+
+
+
+
+#### population projections
+
+```{r}
+
+year_range <- 2023:2024
+
+for (i in year_range) {
+
+print(i)
+getwd()
+  
+year_current <- i
+year_before <- year_current - 1
+
+chart_title <- glue::glue("Population growth projection, {year_before}–{year_current}")
+
+df_rd_pop_total_current <- df_rd_pop_total |> 
+  filter(Year == year_current)
+
+#df_rd_pop_total_current
+
+
+# NOTE: starting with the dataframe that has the data but not the shape does not include the "geometry" variable we need for mapping! 
+
+df_pop_shape <- cd_pop_shape %>% 
+  left_join(df_rd_pop_total_current, by = "geo_uid") 
+
+ggplot(df_pop_shape) +
+  geom_sf(aes(fill = pop_change_rate), colour = "grey90") +
+#  scale_fill_gradient(
+#      low = "#a6611a",
+#    high = "#018571",
+#    na.value = "#ffffff",
+#    limits = c(-2.0, 3.0),
+#    name = "Percent change"
+  scale_fill_distiller(
+    name = "Percent change\nfrom previous year",
+    palette = "BrBG", 
+    direction = 1,
+    na.value = "grey90",
+    limits = c(-2, 3)
+    ) +
+  coord_sf(
+  # projection
+    datum = sf::st_crs(3153),
+  # crop
+  # longitude
+    xlim = c(-123.4,-128.8),
+  # latitude
+    ylim = c(48.4, 50.8)
+    ) +  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = c(0.1, 0.4)
+  ) +
+#  coord_sf(datum = sf::st_crs(3153))
+#  coord_sf(datum = NULL)
+
+  labs(title = chart_title, 
+       subtitle = "Vancouver Island Regional Districts",
+       caption = "Source: BC Stats")
+
+#ggsave(here::here("plot_output", "vi_rd_pop_growth.jpg"))
+file_name <- glue::glue("vi_rd_pop_growth_{year_current}.jpg")
+ggsave(here::here("plot_output", file_name), 
+       dpi = 600,
+       width = 9,
+       height = 6,
+       units = "in"
+       )
+
+}
+
+```
