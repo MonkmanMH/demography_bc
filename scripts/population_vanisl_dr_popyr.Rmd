@@ -1,0 +1,257 @@
+---
+title: "population map & pyramid"
+subtitle: "Comox Valley RD"
+author: "Martin Monkman"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# packages
+library(tidyverse)
+library(here)
+
+# absolute value AND comma function
+# from https://stackoverflow.com/questions/37949473/how-do-you-make-ggplot-labels-use-both-labels-abs-and-labels-comma
+abs_comma <- function (x, ...) {
+  format(abs(x), ..., big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+
+
+
+```
+
+## read data
+
+Source:
+
+-   https://www2.gov.bc.ca/gov/content/data/statistics/people-population-community/population/population-estimates
+
+-   https://www2.gov.bc.ca/assets/gov/data/statistics/people-population-community/population/pop_municipial_subprov_areas.xlsx
+
+Source: BC Stats, Population Estimates by Regional Districts and Development Regions
+
+Population Distribution Vancouver Island and Coast by Age Group\
+2011 2016 2021\
+Under 15 years old 14% 13% 13% Working Age Population (Aged 15 - 64) 67% 65% 62% Population 65+ 19% 22% 25%
+
+Source: BC Stats, Population by Age and Sex.
+
+#### download
+
+https://bcstats.shinyapps.io/popApp/
+
+Select:
+
+-   region type == "Regional District"
+
+-   region(s) == as required
+
+-   years == all
+
+-   genders == M & F
+
+-   age format == "Single Year Age Groups"
+
+-   variables to display as columns = Age
+
+Rename file as "Comox_Valley_Population_Projections_2024-02-04.csv"
+
+
+NOTE: StatCan table with same data for Canada (but no projections) is 
+
+Census Division
+
+Population estimates, July 1, by census division, 2016 boundaries1, 2, 3, 4, 5, 6
+Frequency: Annual
+
+Table: 17-10-0139-01
+
+Release date: 2023-01-11
+
+Geography: Canada, Province or territory, Census division
+https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710013901
+
+Census Subdivision: https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710014201
+
+
+#### read data
+
+
+```{r data_read}
+# all region types
+#data1 <- read_csv(here::here("data_source", "Comox_Valley_Population_Projections_5yr_2024-02-04.csv"))
+
+data1 <- read_rds(here::here("data_output", "pop_bcdata_devreg_2024-02-04.rds"))
+
+```
+
+## Vancouver Island data
+
+```{r}
+
+# total population
+df_vanisle_pop_total <- data1 |> 
+  filter(Region.Name == "Vancouver Island/Coast") |> 
+  filter(Gender == "T") |> 
+  select(Region:Total)
+
+df_vanisle_pop_total <- df_vanisle_pop_total |> 
+  group_by(Region) |> 
+  mutate(pop_change = Total - lag(Total)) |> 
+  mutate(pop_change_rate = pop_change / lag(Total) *100)
+
+df_vanisle_pop_total
+
+
+#file_name <- glue::glue("pop_northbc_rd_{today()}.rds")
+#write_rds(df_devreg_pop_total, here::here("data_output", file_name))
+
+#df_devreg_pop_total <- read_rds(here::here("data_output", file_name))
+
+
+```
+
+How fast is Vancouver Island growing?
+
+```{r}
+# net change
+df_vanisle_pop_total |> 
+  ggplot(aes(x = Year, y = pop_change)) + 
+    geom_line()
+
+
+```
+
+
+## data set up
+
+long-form data for population pyramid
+
+* M is set to negative for plotting
+
+* age group is a factor for correct plot order
+
+```{r}
+
+## population pyramid
+
+# data
+
+df_pop_pyr <- data1 |> 
+  filter(Gender %in% c("F", "M")) 
+
+df_pop_pyr <- df_pop_pyr |> 
+# merge LT1 + 1-4 into 0-4
+#  mutate(`0 to 4` = LT1 + `1 to 4`) |> 
+  select(
+    Region.Name,
+    Year,
+    Gender,
+    `0`:`90+`
+    )  
+
+df_pop_pyr <- df_pop_pyr |> 
+  pivot_longer(-c(Region.Name:Gender),
+               names_to = "age_grp", values_to = "pop_total")  |> 
+  mutate(age_grp = as_factor(age_grp))
+
+levels(df_pop_pyr$age_grp)
+
+# set male values to negative
+df_pop_pyr <- df_pop_pyr |> 
+  mutate(
+    pop_total = case_when(
+      Gender == "M" ~ pop_total * -1,
+      Gender == "F" ~ pop_total,
+      TRUE ~ NA
+    )
+  )
+
+df_pop_pyr
+
+```
+
+
+plot single year / region
+
+```{r}
+# set year and region
+plot_year <- 2044
+
+#plot_region <- "British Columbia"
+plot_region <- "Vancouver Island/Coast"
+
+
+# and plot
+df_pop_pyr_1yr <- df_pop_pyr |> 
+  filter(Region.Name == plot_region) |> 
+  filter(Year == plot_year)
+
+df_pop_pyr_1yr
+
+```
+
+
+```{r}
+pl_pyramid <-  
+  ggplot(
+    df_pop_pyr_1yr,
+    aes(x = pop_total,
+           y = age_grp,
+           fill = Gender
+           )) + 
+  geom_col() +
+  theme_classic() +
+  scale_fill_manual(
+    values=c("#0C3343", "#EF5A27"),          # dark blue and action orange
+    labels=c("men", "women")
+    )  +
+  xlab("population") +
+  ylab(NULL)
+
+pl_pyramid
+
+# fix scale numbering
+```
+
+
+### plot labels
+
+
+
+```{r}
+#pop_range_breaks <- seq(-1000, 1000, by = 250)
+
+pl_pyramid_total <- pl_pyramid +
+  scale_x_continuous(
+#    breaks  = pop_range_breaks,
+    #                      limits = c(min(pop_range_breaks), max(pop_range_breaks)),
+#    limits = c(-1000, 1000),
+#   labels = abs(pop_range_breaks)
+#    labels = scales::comma
+   labels = abs_comma  # custom function that combines absolute value AND commas
+  )  +
+  scale_y_discrete(
+    breaks = c('0', '10', '20', '30', '40', '50', '60', '70', '80', '90+')
+  ) +
+# add vertical white "gridlines"
+#  geom_vline(xintercept = pop_range_breaks, col="white") +
+  labs(
+    title = glue::glue("{plot_region}: {plot_year}"),
+#       subtitle = glue::glue("total population = {community_total_population}"),
+
+       caption = "BC Stats & Statistics Canada"
+       ) +
+  theme(legend.position = "bottom")
+
+pl_pyramid_total
+
+
+ggsave(here::here(glue::glue("plot_output/pyramid_{plot_region}_{plot_year}_population.jpg")))
+
+```
+

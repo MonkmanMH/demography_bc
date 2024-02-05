@@ -101,16 +101,26 @@ write_rds(data1, here::here("data_output", file_name))
 ```
 
 ```{r data_read}
-file_name <- glue::glue("pop_bcdata_{today()}.rds")
+#file_name <- glue::glue("pop_bcdata_{today()}.rds")
 
-data1 <- read_rds(here::here("data_output", file_name))
+#data1 <- read_rds(here::here("data_output", file_name))
+
+# municipality only
+#data1 <- read_rds(here::here("data_output", "pop_bcdata_2024-01-15.rds"))
+
+# all region types
+data1 <- read_rds(here::here("data_output", "pop_bcdata_2023-11-01.rds"))
 
 ```
 
 explore the data 
 
 ```{r}
+unique(data1$Region.Type)
+```
 
+
+```{r}
 df_rd_pop_total <- data1 |> 
   filter(Region.Type == "Regional District") |> 
   filter(Region %in% cd_list) |> 
