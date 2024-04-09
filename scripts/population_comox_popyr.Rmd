@@ -13,6 +13,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(here)
 
+
+source("mnp_defaults_ggplot.R")
+
 # absolute value AND comma function
 # from https://stackoverflow.com/questions/37949473/how-do-you-make-ggplot-labels-use-both-labels-abs-and-labels-comma
 abs_comma <- function (x, ...) {
@@ -124,7 +127,49 @@ df_rd_pop_total |>
     geom_line()
 
 
+# total population
+
+ch_total_pop <- df_rd_pop_total |> 
+  ggplot(aes(x = Year, y = Total)) + 
+    geom_line(size = 2, colour = "#002060")
+
+ch_total_pop
+
 ```
+
+```{r}
+# make it pretty
+
+ch_total_pop +
+  mnp_chart_theme +
+  scale_y_continuous(
+    limits = c(0, 125000),
+    breaks = c(0, 25000, 50000, 75000, 100000, 125000),
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Comox Valley Regional District",
+    subtitle = "Population growth, 2001-2046",
+    caption = "Source: BCStats & Statistics Canada"
+  ) +
+  xlab(NULL) +
+  ylab("Total population")
+
+
+
+#ggsave(here::here("plot_output/pyramid_van_isl_2021_population.jpg"),
+#       width = 13.333,
+#       height = 7.5
+#  )
+
+
+ggsave(here::here("plot_output","comox_valley_population_2001-46.jpg"))
+
+
+
+
+```
+
 
 
 ## 2024 over 2023
@@ -183,7 +228,32 @@ df_rd_pop_pyr <- df_rd_pop_pyr |>
 
 df_rd_pop_pyr
 
+write_csv(df_rd_pop_pyr, here::here("data_output", "df_rd_comox_pop_pyr.csv"))
+
 ```
+
+### pct over 65
+
+```{r}
+
+df_rd_over65 <- data1 |> 
+  filter(Gender == "T") |> 
+  select(Region.Name, Year, Total, `65`:`90+`) 
+
+
+df_rd_over65 <- df_rd_over65 |>
+  group_by(Year) |>
+  rowwise() |> 
+  mutate(`65+` = 
+           sum(c_across(`65`:`90+`)))
+
+
+df_rd_over65 |> 
+  filter(Region.Name == "Comox Valley") |> 
+  mutate(pct_65plus = `65+` / Total)
+
+```
+
 
 
 plot

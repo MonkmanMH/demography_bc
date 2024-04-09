@@ -1,6 +1,6 @@
 ---
 title: "population map & pyramid"
-subtitle: "Comox Valley RD"
+subtitle: "Vancouver Island & Coastal Economic Development Region"
 author: "Martin Monkman"
 date: "`r Sys.Date()`"
 output: html_document
@@ -58,24 +58,13 @@ Select:
 
 -   variables to display as columns = Age
 
-Rename file as "Comox_Valley_Population_Projections_2024-02-04.csv"
+Rename file as "VIC_Population_Projections_2024-04-08.csv"
+
 
 
 NOTE: StatCan table with same data for Canada (but no projections) is 
 
-Census Division
-
-Population estimates, July 1, by census division, 2016 boundaries1, 2, 3, 4, 5, 6
-Frequency: Annual
-
-Table: 17-10-0139-01
-
-Release date: 2023-01-11
-
-Geography: Canada, Province or territory, Census division
-https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710013901
-
-Census Subdivision: https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710014201
+FIND THIS TABLE
 
 
 #### read data
@@ -85,7 +74,18 @@ Census Subdivision: https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=171001
 # all region types
 #data1 <- read_csv(here::here("data_source", "Comox_Valley_Population_Projections_5yr_2024-02-04.csv"))
 
-data1 <- read_rds(here::here("data_output", "pop_bcdata_devreg_2024-02-04.rds"))
+#all development regions, single year
+#data1 <- read_csv(here::here("data_source", "bcstats_development-region-population_2024-04-08.csv"))
+#data1
+
+# Vancouver Isl & Coast, 5 year
+#data1 <- read_csv(here::here("data_source", "bcstats_Population_Projections_dr-VIC_2024-04-08.csv"))
+# BC, all ec dev regions, 5 year
+data1 <- read_csv(here::here("data_source", "bcstats_Population_Projections_dr-BC_2024-04-08.csv"))
+data1 <- data1 |> 
+  janitor::clean_names()
+
+data1
 
 ```
 
@@ -95,12 +95,12 @@ data1 <- read_rds(here::here("data_output", "pop_bcdata_devreg_2024-02-04.rds"))
 
 # total population
 df_vanisle_pop_total <- data1 |> 
-  filter(Region.Name == "Vancouver Island/Coast") |> 
-  filter(Gender == "T") |> 
-  select(Region:Total)
+#  filter(Region.Name == "Vancouver Island/Coast") |> 
+#  select(Gender == "T") |> 
+  select(development_region, year, age, "Total" = t) |> 
+  filter(age == "Total")
 
 df_vanisle_pop_total <- df_vanisle_pop_total |> 
-  group_by(Region) |> 
   mutate(pop_change = Total - lag(Total)) |> 
   mutate(pop_change_rate = pop_change / lag(Total) *100)
 
@@ -120,7 +120,7 @@ How fast is Vancouver Island growing?
 ```{r}
 # net change
 df_vanisle_pop_total |> 
-  ggplot(aes(x = Year, y = pop_change)) + 
+  ggplot(aes(x = year, y = pop_change)) + 
     geom_line()
 
 
@@ -136,24 +136,22 @@ long-form data for population pyramid
 * age group is a factor for correct plot order
 
 ```{r}
-
 ## population pyramid
 
 # data
 
 df_pop_pyr <- data1 |> 
-  filter(Gender %in% c("F", "M")) 
+  select(year,
+         age,
+         "F" = f, 
+         "M" = m)
 
-df_pop_pyr <- df_pop_pyr |> 
-# merge LT1 + 1-4 into 0-4
-#  mutate(`0 to 4` = LT1 + `1 to 4`) |> 
-  select(
-    Region.Name,
-    Year,
-    Gender,
-    `0`:`90+`
-    )  
+df_pop_pyr
 
+```
+
+
+```{r}
 df_pop_pyr <- df_pop_pyr |> 
   pivot_longer(-c(Region.Name:Gender),
                names_to = "age_grp", values_to = "pop_total")  |> 
